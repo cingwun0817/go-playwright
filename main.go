@@ -85,7 +85,7 @@ func run(uri string) string {
 	}
 
 	browser, err := pw.Firefox.Launch(playwright.BrowserTypeLaunchOptions{
-		ExecutablePath: playwright.String("/home/leowang/.cache/ms-playwright/firefox-1475/firefox/firefox"),
+		ExecutablePath: playwright.String(viper.GetString("playwright.executable-path")),
 	})
 	if err != nil {
 		log.Fatalf("[main] pw.Firefox.Launch, error: %v", err)
