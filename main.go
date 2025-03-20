@@ -22,6 +22,10 @@ func main() {
 		log.Fatalf("[main] connectNATS, %v", err)
 	}
 
+	if err := ensureRuntimeDir(); err != nil {
+		log.Fatalf("[main] ensureRuntimeDir, %v", err)
+	}
+
 	go func(js nats.JetStreamContext) {
 		js.QueueSubscribe(viper.GetString("nats-server.subject"), "worker", process)
 	}(js)
@@ -52,6 +56,21 @@ func connectNATS(host string) (nats.JetStreamContext, error) {
 	return nc.JetStream()
 }
 
+func ensureRuntimeDir() error {
+	runtimeDir := "runtime"
+	info, err := os.Stat(runtimeDir)
+	if os.IsNotExist(err) {
+		return os.Mkdir(runtimeDir, 0755)
+	}
+	if err != nil {
+		return err
+	}
+	if !info.IsDir() {
+		return os.ErrExist
+	}
+	return nil
+}
+
 type Task struct {
 	Uri string `json:"uri"`
 }
@@ -60,7 +79,7 @@ func process(msg *nats.Msg) {
 	// recover
 	defer func() {
 		if r := recover(); r != nil {
-			log.Fatalf("[process][recover] %v, task: %s", r, string(msg.Data))
+			log.Printf("[process][recover] %v, task: %s", r, string(msg.Data))
 		}
 
 		msg.Ack()
@@ -73,7 +92,7 @@ func process(msg *nats.Msg) {
 	}
 
 	result := run(task.Uri)
-	log.Printf("read: %s, to: %s", task.Uri, result)
+	log.Printf("crawler %s to %s", task.Uri, result)
 
 	msg.Ack()
 }
@@ -83,6 +102,11 @@ func run(uri string) string {
 	if err != nil {
 		log.Fatalf("[main] playwright.Run, error: %v", err)
 	}
+	defer func() {
+		if err = pw.Stop(); err != nil {
+			log.Fatalf("[main] pw.Stop, error: %v", err)
+		}
+	}()
 
 	browser, err := pw.Firefox.Launch(playwright.BrowserTypeLaunchOptions{
 		ExecutablePath: playwright.String(viper.GetString("playwright.executable-path")),
@@ -90,6 +114,11 @@ func run(uri string) string {
 	if err != nil {
 		log.Fatalf("[main] pw.Firefox.Launch, error: %v", err)
 	}
+	defer func() {
+		if err = browser.Close(); err != nil {
+			log.Fatalf("[main] browser.Close, error: %v", err)
+		}
+	}()
 
 	page, err := browser.NewPage()
 	if err != nil {
@@ -117,14 +146,6 @@ func run(uri string) string {
 	err = os.WriteFile("runtime/"+filename, []byte(html), 0644)
 	if err != nil {
 		log.Fatalf("[main] os.WriteFile, error: %v", err)
-	}
-
-	if err = browser.Close(); err != nil {
-		log.Fatalf("[main] browser.Close, error: %v", err)
-	}
-
-	if err = pw.Stop(); err != nil {
-		log.Fatalf("[main] pw.Stop, error: %v", err)
 	}
 
 	return filename
